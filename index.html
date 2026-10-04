@@ -1924,6 +1924,8 @@ init();
 .cp-bell { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; flex-shrink: 0;
   border-radius: 50%; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-ink); cursor: pointer; padding: 0; margin: 0 6px 0 0; }
 .cp-bell:hover { background: var(--cp-hover); }
+.cp-bell.problem { border-color: var(--cp-warn-bd); color: var(--cp-warn-fg); }
+.cp-bell.problem::after { content: "!"; position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%; background: var(--cp-warn-solid); color: #fff; font: 800 11px/16px var(--cp-font); text-align: center; }
 .cp-bell .material-symbols-rounded { font-size: 22px; }
 .cp-bell.ring { animation: cp-ring .8s ease 1; }
 @keyframes cp-ring { 0%,100% { transform: rotate(0) } 20% { transform: rotate(14deg) } 40% { transform: rotate(-12deg) } 60% { transform: rotate(8deg) } 80% { transform: rotate(-4deg) } }
@@ -1968,7 +1970,7 @@ init();
 <script>
 (function () {
   if (window.__cpInbox) return; window.__cpInbox = true;
-  var items = [], unread = 0, lastUnread = null, bell, badge, panel, list, timer;
+  var items = [], unread = 0, lastUnread = null, bell, badge, panel, list, timer, problem = '';
 
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function safeUrl(u) { return /^https?:\/\/[^\s]+$/i.test(String(u || '')) ? u : ''; }
@@ -1994,6 +1996,8 @@ init();
 
   function render() {
     if (!list) return;
+    if (problem) { list.innerHTML = '<div class="cp-in-empty" role="alert">' + esc(problem) + '</div>'; if (bell) bell.classList.add('problem'); return; }
+    if (bell) bell.classList.remove('problem');
     if (!items.length) { list.innerHTML = '<div class="cp-in-empty">連絡はありません</div>'; return; }
     list.innerHTML = items.map(function (m) {
       var atts = (m.attachments || []).map(safeUrl).filter(String);
@@ -2025,11 +2029,16 @@ init();
 
   function load(first) {
     return run('getMyMessages').then(function (r) {
-      if (r && r.disabled) { if (bell) bell.style.display = 'none'; clearInterval(timer); return; }   // Bridge 未接続／生徒メール未登録
+      if (r && r.disabled) { if (bell) bell.style.display = 'none'; clearInterval(timer); return; }   // Bridge 未接続（設定なし）だけは、ベルを出さない
+      problem = (r && r.problem) || '';   // 接続・登録の問題は、ベルを消さずに、中で理由を知らせる
       items = (r && r.messages) || []; unread = (r && r.unread) || 0;
       if (!first && lastUnread !== null && unread > lastUnread) { toast('新しい連絡があります'); bell.classList.remove('ring'); void bell.offsetWidth; bell.classList.add('ring'); }
       lastUnread = unread; setBadge(); render(); banner();
-    }).catch(function () { if (first && bell) bell.style.display = 'none'; });    // 生徒以外（教員の確認画面など）では出さない
+    }).catch(function (e) {
+      // 生徒以外（教員の確認画面など）では出さない。それ以外の一時的な失敗では、ベルを消さずに、理由を出す
+      if (/生徒として|ログインしてください/.test(String((e && e.message) || e))) { if (first && bell) bell.style.display = 'none'; return; }
+      problem = '連絡を読み込めませんでした。しばらくしてから、もう一度開いてください。'; items = []; unread = 0; setBadge(); render();
+    });
   }
 
   function open() {

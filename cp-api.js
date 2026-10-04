@@ -96,6 +96,16 @@
   }
 
   /* ---------- API 呼び出し ---------- */
+  // サーバーの返すエラーを、直し方が分かる文にする
+  function explain(e) {
+    var s = String(e);
+    if (s === 'API_DISABLED') return 'サーバー側で、アプリ用の API が有効になっていません。管理者に、スクリプトプロパティ API_CLIENT_ID の設定を依頼してください。';
+    if (s === 'UNAUTHORIZED') return 'ログイン情報を確認できませんでした。学校のアカウントでログインしているか、アプリとサーバーの OAuth クライアントID（cp-config.js の GOOGLE_CLIENT_ID と、サーバーの API_CLIENT_ID）が同じか、確認してください。';
+    if (s === 'UNKNOWN_FN') return 'このアプリは、まだこの操作に対応していません（サーバー側の code.gs が古い可能性があります）。';
+    if (/^Users未登録/.test(s)) return 'このアカウント（' + s.replace(/^Users未登録:\s*/, '') + '）は、名簿に登録されていません。担任の先生に伝えてください。';
+    if (/^Students未登録/.test(s)) return 'このアカウント（' + s.replace(/^Students未登録:\s*/, '') + '）は、生徒として登録されていません。このアプリは生徒用です（教員は、PC・スマホのブラウザで、通常のページをお使いください）。';
+    return s;
+  }
   function call(fn, args, retried) {
     // 設定が空のときは、保存済みトークンがあっても通信せず、設定案内を出して止める
     if (!C.API_URL || !C.GOOGLE_CLIENT_ID) return login();
@@ -107,12 +117,17 @@
         redirect: 'follow'
       });
     }).then(function (r) {
-      if (!r.ok) throw new Error('サーバーに接続できません (' + r.status + ')');
-      return r.json();
+      // 返事が JSON でないとき（Google の「アクセス権が必要です」のページなど）は、原因が分かる文にする
+      return r.text().then(function (t) {
+        var j = null; try { j = JSON.parse(t); } catch (e) {}
+        if (j) return j;
+        if (/アクセス権|You need access|ログイン|Sign in|accounts\.google\.com/i.test(t) || r.status === 401 || r.status === 403) throw new Error('サーバー（API用のデプロイ）に入れません。Apps Script のデプロイの「アクセスできるユーザー」が「全員」になっているか、API_URL が「API用デプロイ」の URL か、確認してください。(' + r.status + ')');
+        throw new Error('サーバーの返事を読み取れません (' + r.status + ')。API_URL が正しいか確認してください。');
+      });
     }).then(function (j) {
       if (j && j.ok) return j.result;
       if (j && j.error === 'UNAUTHORIZED' && !retried) { clear(); return call(fn, args, true); }   // 期限切れ → 取り直して1回だけ再試行
-      throw new Error((j && j.error) || '不明なエラー');
+      throw new Error(explain((j && j.error) || '不明なエラー'));
     });
   }
 
